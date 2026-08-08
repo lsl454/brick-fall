@@ -1,0 +1,10 @@
+node_modules/
+package-lock.json
+# Android 平台目录由 CI 用 `npx cap add android` 现场生成，不入库
+android/
+ios/
+*.apk
+*.aab
+*.keystore
+*.jks
+.DS_Store

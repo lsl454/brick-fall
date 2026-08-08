@@ -1,0 +1,11 @@
+{
+  "appId": "com.brickfall.game",
+  "appName": "砖块消消落",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#100c0e"
+  }
+}
