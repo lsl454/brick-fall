@@ -2,18 +2,24 @@ import { CELL, BX, BY, BOARD_W, BOARD_H } from "./constants.js";
 import { clamp, lerp, shade, shadeA } from "./utils.js";
 
 /** 碎片 / 灰尘 / 火星 / 闪光 / 飘字 / Combo / 震屏，全部对象池复用 */
+const MAX_PARTS = 320;   // 粒子硬上限，超出则回收最老的，防止连锁爆炸时掉帧
+
 export class Effects {
   constructor(){
     this.pool = []; this.parts = [];
     this.texts = []; this.flashes = [];
     this.shakeT = 0; this.shakeAmp = 0;
-    this.slowmo = 0; this.combo = null;
+    this.slowmo = 0; this.combo = null; this.rings = []; this.beams = []; this.screen = null;
   }
   clear(){
     this.parts.length=0; this.texts.length=0; this.flashes.length=0;
     this.shakeT=0; this.shakeAmp=0; this.combo=null; this.slowmo=0;
+    this.rings.length=0; this.beams.length=0; this.screen=null;
   }
-  _get(){ return this.pool.pop() || {}; }
+  _get(){
+    if(this.parts.length >= MAX_PARTS) this._kill(0);   // 回收最老的
+    return this.pool.pop() || {};
+  }
   _kill(i){ this.pool.push(this.parts[i]); this.parts.splice(i,1); }
 
   shard(x,y,color){
@@ -49,6 +55,9 @@ export class Effects {
     this.dust(x+CELL/2, y+CELL, 3);
     if(Math.random()<0.55) this.spark(x+Math.random()*CELL, y+Math.random()*CELL);
   }
+  beam(row, color){ this.beams.push({row, color, life:0, max:0.5}); }
+  screenFlash(color, a){ this.screen = { color, a, life:0, max:0.32 }; }
+  ring(x,y,color){ this.rings.push({x,y,color,life:0,max:0.6}); }
   rowFlash(row){ this.flashes.push({row, life:0, max:0.45}); }
   text(x,y,str,color,size){ this.texts.push({x,y,str,color,size:size||22,life:0,max:1.1}); }
   comboPop(str,level){ this.combo={str, life:0, max:1.25, level}; }
@@ -71,6 +80,9 @@ export class Effects {
       const f=this.flashes[i]; f.life+=dt;
       if(f.life>=f.max) this.flashes.splice(i,1);
     }
+    for(let i=this.rings.length-1;i>=0;i--){ const r=this.rings[i]; r.life+=dt; if(r.life>=r.max) this.rings.splice(i,1); }
+    for(let i=this.beams.length-1;i>=0;i--){ const b=this.beams[i]; b.life+=dt; if(b.life>=b.max) this.beams.splice(i,1); }
+    if(this.screen){ this.screen.life+=dt; if(this.screen.life>=this.screen.max) this.screen=null; }
     if(this.combo){ this.combo.life+=dt; if(this.combo.life>=this.combo.max) this.combo=null; }
     if(this.shakeT>0){ this.shakeT-=dt; if(this.shakeT<=0) this.shakeAmp=0; }
     if(this.slowmo>0) this.slowmo=Math.max(0,this.slowmo-dt);
@@ -80,16 +92,74 @@ export class Effects {
     const a=this.shakeAmp*this.shakeT;
     return [(Math.random()-0.5)*a*2,(Math.random()-0.5)*a*2];
   }
+  /** 把亮部喂给 Bloom：只挑碎片与火星，成本极低 */
+  maskTo(Bloom){
+    for(const p of this.parts){
+      if(p.kind==="dust") continue;
+      const k=1-p.life/p.max;
+      Bloom.maskCircle(p.x, p.y, p.size*1.4, p.color, k*0.55);
+    }
+    for(const b of this.beams){
+      const k=1-b.life/b.max;
+      Bloom.mask(BX, BY+b.row*CELL, BOARD_W, CELL, "#ffffff", k*0.8);
+    }
+  }
+
+  drawScreen(ctx, W, H){
+    if(!this.screen) return;
+    const k=1-this.screen.life/this.screen.max;
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.globalAlpha=this.screen.a*k;
+    ctx.fillStyle=this.screen.color;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
+
   draw(ctx){
+    for(const r of this.rings){
+      const k=r.life/r.max;
+      ctx.save();
+      ctx.globalCompositeOperation="lighter";
+      ctx.globalAlpha=(1-k)*0.85;
+      ctx.strokeStyle=r.color; ctx.lineWidth=4*(1-k)+1;
+      ctx.shadowColor=r.color; ctx.shadowBlur=20;
+      ctx.beginPath(); ctx.arc(r.x,r.y, 20+k*230, 0, 6.283); ctx.stroke();
+      ctx.restore();
+    }
+    for(const b of this.beams){
+      const k=1-b.life/b.max;
+      const cy=BY+b.row*CELL+CELL/2;
+      ctx.save();
+      ctx.globalCompositeOperation="lighter";
+      // 宽扩散
+      ctx.globalAlpha=k*0.5;
+      const wide=ctx.createLinearGradient(0,cy-CELL*2.2,0,cy+CELL*2.2);
+      wide.addColorStop(0,"rgba(255,255,255,0)");
+      wide.addColorStop(0.5,b.color);
+      wide.addColorStop(1,"rgba(255,255,255,0)");
+      ctx.fillStyle=wide;
+      ctx.fillRect(BX-10, cy-CELL*2.2, BOARD_W+20, CELL*4.4);
+      // 白核
+      ctx.globalAlpha=k;
+      const core=ctx.createLinearGradient(BX,0,BX+BOARD_W,0);
+      core.addColorStop(0,"rgba(255,255,255,0)");
+      core.addColorStop(0.5,"rgba(255,255,255,1)");
+      core.addColorStop(1,"rgba(255,255,255,0)");
+      ctx.fillStyle=core;
+      const hh=Math.max(1.5, CELL*0.34*k);
+      ctx.fillRect(BX, cy-hh/2, BOARD_W, hh);
+      ctx.restore();
+    }
     for(const f of this.flashes){
       const k=1-f.life/f.max;
-      ctx.save(); ctx.globalCompositeOperation="lighter"; ctx.globalAlpha=k*0.75;
+      ctx.save(); ctx.globalCompositeOperation="lighter"; ctx.globalAlpha=k*0.6;
       const g=ctx.createLinearGradient(BX,0,BX+BOARD_W,0);
       g.addColorStop(0,"rgba(255,220,200,0)");
-      g.addColorStop(0.5,"rgba(255,235,215,1)");
+      g.addColorStop(0.5,"rgba(255,240,225,1)");
       g.addColorStop(1,"rgba(255,220,200,0)");
       ctx.fillStyle=g;
-      const h=CELL*(0.4+k*1.4);
+      const h=CELL*(0.3+k*1.2);
       ctx.fillRect(BX, BY+f.row*CELL+CELL/2-h/2, BOARD_W, h);
       ctx.restore();
     }

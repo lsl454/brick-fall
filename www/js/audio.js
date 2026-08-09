@@ -45,6 +45,7 @@ export const AudioManager = {
       case "chain":  this.tone(520,0.10,"square",0.06,780); break;
       case "combo":  this.tone(660,0.14,"square",0.07,1180); break;
       case "over":   this.tone(300,0.50,"sawtooth",0.09,70); break;
+      case "cast":   this.tone(300,0.30,"sine",0.09,1400); this.noise(0.22,0.16,3000); break;
       case "click":  this.tone(600,0.05,"square",0.05); break;
     }
   },
