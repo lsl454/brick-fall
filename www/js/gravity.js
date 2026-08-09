@@ -1,10 +1,8 @@
-import { COLS, ROWS, CELL, BX, BY, GRAV_ACC } from "./constants.js";
+import { COLS, ROWS, CELL, BX, BY, BOARD_W } from "./constants.js";
 import { clamp } from "./utils.js";
 
 /**
  * 独立砖块重力坍塌。
- * 关键点：删除满行时只把该行挖空，绝不做整行数组下移。
- * 之后每一列自底向上扫描，每块砖各自计算落点，因此不同列的下落距离不同。
  */
 export const GravitySystem = {
   apply(board){
@@ -15,7 +13,7 @@ export const GravitySystem = {
         const cell = board.grid[r][c];
         if(!cell) continue;
         if(target !== r){
-          cell.dy = -(target - r) * CELL;   // 视觉上仍停在旧位置，逐帧补回
+          cell.dy = -(target - r) * CELL;
           cell.vy = 0;
           cell.falling = true;
           board.grid[target][c] = cell;
@@ -25,6 +23,7 @@ export const GravitySystem = {
         target--;
       }
     }
+    if(moved) board.touch();
     return moved;
   },
   update(board, dt, effects, speedMul){
