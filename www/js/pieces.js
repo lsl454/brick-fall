@@ -1,4 +1,4 @@
-import { SHAPES, PALETTE, COLS } from "./constants.js";
+import { SHAPES, COLS, TYPES } from "./constants.js";
 
 export function rotateMatrix(m, dir){
   const n=m.length, r=[];
@@ -10,11 +10,20 @@ export function rotateMatrix(m, dir){
   return r;
 }
 
+export function makePiece(type){
+  const m = SHAPES[type].map(r=>r.slice());
+  return {
+    type, matrix:m, rot:0,
+    row: type==="I" ? -1 : -2,
+    col: Math.floor((COLS - m.length)/2)
+  };
+}
+
 export const PieceFactory = {
   bag: [],
   reset(){ this.bag = []; },
   refill(){
-    const keys = Object.keys(SHAPES);
+    const keys = TYPES.slice();
     for(let i=keys.length-1;i>0;i--){
       const j=(Math.random()*(i+1))|0;
       const t=keys[i]; keys[i]=keys[j]; keys[j]=t;
@@ -23,12 +32,6 @@ export const PieceFactory = {
   },
   next(){
     if(this.bag.length===0) this.refill();
-    const type = this.bag.pop();
-    const m = SHAPES[type].map(r=>r.slice());
-    return {
-      type, color: PALETTE[type], matrix: m, rot: 0,
-      row: type==="I" ? -1 : -2,
-      col: Math.floor((COLS - m.length)/2)
-    };
+    return makePiece(this.bag.pop());
   }
 };

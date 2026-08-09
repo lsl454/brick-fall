@@ -1,10 +1,17 @@
 import { CANVAS_W, CANVAS_H, CELL, BX, BY, BOARD_W, BOARD_H } from "./constants.js";
 
+const AXIS_LOCK = 10;   // 位移超过这个像素数就锁定主轴
+const AXIS_BIAS = 1.6;  // 纵向优先系数，越大越不容易在速降时误触横移
+
 /**
  * 输入层：把触摸、鼠标、键盘统一收敛成动作事件交给 Game。
- * 触控支持两套操作，玩家可混用：
- *   A. 底部虚拟按键（长按连发）
- *   B. 棋盘区手势：横向拖动逐格移动、轻点旋转、快速下滑硬降、慢速下滑软降
+ * 极简版：棋盘区全部靠手势操作，界面上只剩暂停与 4 枚技能符文。
+ *   横向拖动 → 逐格移动
+ *   轻点     → 顺时针旋转
+ *   双指轻点 → 逆时针旋转
+ *   快速下滑 → 硬降
+ *   慢速下拖 → 软降
+ *   上滑     → 暂存
  */
 export class Input {
   constructor(canvas, game){
@@ -46,8 +53,11 @@ export class Input {
       }
       // 2) 棋盘手势
       if(this.game.mode === "playing" && this.inBoard(p)){
+        // 已有一根手指在棋盘上 → 本次为双指，标记为逆时针旋转
+        let multi = false;
+        for(const st of this.pointers.values()) if(st.kind === "gesture") multi = true;
         this.pointers.set(e.pointerId, {
-          kind:"gesture", sx:p.x, sy:p.y, lx:p.x, ly:p.y,
+          kind:"gesture", sx:p.x, sy:p.y, lx:p.x, ly:p.y, multi, axis:null,
           movedCols:0, dragDown:0, t0:performance.now(), moved:false
         });
       } else {
@@ -60,7 +70,6 @@ export class Input {
       if(!st) return;
       const p = this.toLocal(e);
       if(st.kind === "button"){
-        // 手指滑出按钮则取消
         if(!this.hit(st.btn,p)){
           this.pointers.set(e.pointerId, { kind:"none" });
           this.game.activeBtn = null;
@@ -69,19 +78,41 @@ export class Input {
       }
       if(st.kind !== "gesture") return;
 
-      const dx = p.x - st.lx, dy = p.y - st.ly;
-      if(Math.abs(p.x-st.sx) > 8 || Math.abs(p.y-st.sy) > 8) st.moved = true;
+      const totalX = p.x - st.sx, totalY = p.y - st.sy;
 
-      // 横向：每滑过一个格宽移动一格
-      if(Math.abs(dx) >= CELL*0.72){
-        const dir = dx > 0 ? 1 : -1;
-        this.game.action(dir > 0 ? "right" : "left");
-        st.lx = p.x; st.movedCols++;
+      // ---- 轴向锁定 ----
+      // 手指下滑时几乎不可能走得笔直，稍微偏一点就会顺带触发横移，
+      // 表现出来就是"想速降却斜着落下去"。所以一旦判定出主轴，
+      // 本次手势就只认这一个方向，另一个轴直接丢弃，直到手指抬起。
+      if(st.axis === null){
+        const ax = Math.abs(totalX), ay = Math.abs(totalY);
+        if(ax > AXIS_LOCK || ay > AXIS_LOCK){
+          // 纵向只要占到横向的 1/AXIS_BIAS 就判为纵向，偏向保护速降
+          st.axis = (ay * AXIS_BIAS >= ax) ? "v" : "h";
+          st.lx = p.x; st.ly = p.y;
+        }
       }
-      // 纵向下滑：软降
-      if(dy >= CELL*0.62){
-        this.game.action("softDrop");
-        st.ly = p.y; st.dragDown++;
+      if(Math.abs(totalX) > 8 || Math.abs(totalY) > 8) st.moved = true;
+      if(st.axis === null) return;
+
+      if(st.axis === "h"){
+        const dx = p.x - st.lx;
+        if(Math.abs(dx) >= CELL*0.7){
+          const steps = Math.trunc(dx / (CELL*0.7));
+          const dir = steps > 0 ? 1 : -1;
+          for(let i=0;i<Math.min(Math.abs(steps),3);i++)
+            this.game.action(dir > 0 ? "right" : "left");
+          st.lx += steps * CELL*0.7;
+          st.movedCols += Math.abs(steps);
+        }
+      } else {
+        const dy = p.y - st.ly;
+        if(dy >= CELL*0.6){
+          const steps = Math.min(Math.trunc(dy / (CELL*0.6)), 4);
+          for(let i=0;i<steps;i++) this.game.action("softDrop");
+          st.ly += steps * CELL*0.6;
+          st.dragDown += steps;
+        }
       }
     }, { passive:false });
 
@@ -95,8 +126,11 @@ export class Input {
         const dt = (performance.now() - st.t0) / 1000;
         const totalY = p.y - st.sy, totalX = p.x - st.sx;
         // 快速下滑 = 硬降
-        if(totalY > CELL*2.2 && dt < 0.32 && Math.abs(totalX) < Math.abs(totalY)){
+        const vertical = st.axis === "v";
+        if(vertical && totalY > CELL*1.6 && dt < 0.34){
           this.game.action("hardDrop");
+        } else if(vertical && totalY < -CELL*1.4 && dt < 0.42){
+          this.game.action("hold");
         } else if(!st.moved && dt < 0.35){
           // 轻点 = 顺时针旋转
           this.game.action("rotateCW");
