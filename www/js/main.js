@@ -14,7 +14,8 @@ fit();
 
 // 提升高 DPR 屏幕清晰度
 const cv = document.getElementById("game");
-const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+// DPR 上限压到 2：手机上 3x 渲染的像素量是 2x 的 2.25 倍，肉眼几乎无差别
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
 cv.width  = CANVAS_W * dpr;
 cv.height = CANVAS_H * dpr;
 cv.getContext("2d").setTransform(dpr,0,0,dpr,0,0);
